@@ -1,0 +1,284 @@
+openapi: 3.0.0
+info:
+  title: CLiQQ PAY E-Money API
+  description: | 
+    This is the API that MUST be implemented by E-Money Issuers to get accepted at 7-Eleven Stores
+  version: 1.0.0a
+
+servers:
+  - url: https://ISSUER_HOST/api
+  
+tags:
+- name: "charge"
+  description: "A charge deducts against an E-money wallet balance"
+- name: "reversal"
+  description: "A reversal cancels a previous charge and returns the amount to the walet balance"  
+  
+
+paths:
+  /charge:
+    post:
+      summary: Create a charge
+      description: |
+        This endpoint will be called by cliqqpay whenever a Time based One Time Pin(TOTP) 
+        from an E-money issuer partner is presented as payment for goods and/or services
+      
+      
+        Issuer partners implementing this API must respond within 8 seconds or be timed out.
+        When a transaction is timed out, cliqqpay will resend the transaction 
+        with the retry flag set to true and will wait for another 8 seconds.
+      
+        
+        When no response is received, the terminal will time out and will queue a reversal message.
+        
+      tags: 
+      - "charge"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Charge'
+      responses: 
+        '200':
+          description: |
+            this result should ony be returned when the transaction is a retry and the transaction has already
+            been processed in a previous request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Charge'
+        '201':
+          description: |
+            This result should be returned if and only if:
+            - the terminal is valid
+            - the location is valid
+            - the signature is valid
+            - the totp is valid
+            - balance deduction was successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Charge'
+        '400':
+          description: |
+            This result should be returned if any of the following is true:
+            - the terminal is NOT valid
+            - the location is NOT valid
+            - the signature is NOT valid
+            - the totp is NOT valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Charge'
+        '500':
+          description: |
+            This result should be returned if any of the following is true:
+            - balance deduction FAILED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Charge'
+  /reversal:
+    post:
+      summary: Create a reversal
+      description: This endpoint will be called by cliqqpay in response to a reversal message from the terminal
+      tags: 
+      - "reversal"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reversal'
+      responses:
+        '200':
+          description: this result should only be retuned when a charge matching the request was not found
+        '201':
+          description: this result should only be retuned when a charge was found and was reversed
+components:
+  schemas:
+    Charge:
+      properties:
+        totp:
+          type: string
+          description: time based one time pin
+          minLength: 16
+          maxLength: 55
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 8
+          enum: [php,usd]
+          description: the currency of the charge
+        amount:
+          type: number
+          format: int
+          minimum: 1
+          maximum: 500000
+          description: amount to deduct multiplied by 100 i.e. 101.23 -> 10123
+        cashier:
+          type: string
+          minLength: 3
+          maxLength: 55
+          description: identifies the cashier making the charge
+        terminal:
+          type: string
+          minLength: 3
+          maxLength: 55
+          description: identifies the terminal making the charge
+        location:
+          type: string
+          minLength: 3
+          maxLength: 55
+          description: identifies the store making the charge
+        trace:
+          type: string
+          minLength: 3
+          maxLength: 21
+          description: terminal generated trace number 
+        requestDate:
+          type: string
+          format: date
+          description: the date at the terminal when the charge was created
+        requestTime:
+          type: string
+          format: time
+          description: the time at the terminal when the charge was created
+        signature:
+          type: string
+          format: byte
+          description: |
+            base64 encoded HMAC-SHA256 i.e. sha256-XXXYYYZZZZ
+            
+            To compute HMAC-SHA256 concatenate
+            - totp
+            - currency
+            - amount
+            - cashier
+            - terminal
+            - location
+            - trace
+            - requestDate
+            - requestTime
+            - hmacKey
+            
+            then use SHA256 to produce the signature then prepend the string 'sha256-'
+        retry:
+          type: boolean
+          description: |
+            cliqqpay will set this to true to signal a retry.
+            when this field is set to true, emoney partners should check if the charge 
+            has already been processed using the following combination: requestDate, requestTime, location, terminal, trace
+            
+            if already processed, emoney partners should return the previousresults
+        
+        resultCode:
+          type: number
+          format: int
+          description: machine readable status code, 0 for successful, non zero for error
+        result:
+          type: string
+          minLength: 3
+          maxLength: 21
+          description: human readable status or error message
+        authorizationCode:
+          type: string
+          minLength: 3
+          maxLength: 21
+          description: authorization code generated by issuer side system, empty when statusCode is non zero
+        issuerReference:
+          type: string
+          minLength: 3
+          maxLength: 21
+          description: reference number of the transaction on the issuer side system
+        issuerDate:
+          type: string
+          format: date
+          description: the date at the issuer side system
+        issuerTime:
+          type: string
+          format: time
+          description: the time at the issuer side system
+        remainingBalance:
+          type: number
+          format: int
+          description: the remaining balance of the wallet multiplied by 100 i.e. 101.23 -> 10123
+          
+          
+      required:  
+        - totp
+        - currency
+        - amount
+        - cashier
+        - terminal
+        - location
+        - trace
+        - requestDate
+        - requestTime
+        - signature
+    Reversal:
+      properties:
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 8
+          enum: [php,usd]
+          description: the currency of the charge being reveresed
+        amount:
+          type: number
+          format: int
+          minimum: 1
+          maximum: 500000
+          description: amount deducted by the charge multiplied by 100 i.e. 101.23 -> 10123
+        terminal:
+          type: string
+          minLength: 3
+          maxLength: 55
+          description: identifies the terminal that made the charge being reveresed
+        location:
+          type: string
+          minLength: 3
+          maxLength: 55
+          description: identifies the store making the charge being reveresed
+        trace:
+          type: string
+          minLength: 3
+          maxLength: 21
+          description: terminal generated trace number when the charge was created 
+        requestDate:
+          type: string
+          format: date
+          description: the date at the terminal when the charge was created
+        requestTime:
+          type: string
+          format: time
+          description: the time at the terminal when the charge was created
+        signature:
+          type: string
+          format: byte
+          description: |
+            base64 encoded HMAC-SHA256 i.e. sha256-XXXYYYZZZZ
+            
+            To compute HMAC-SHA256 concatenate
+            - currency
+            - amount
+            - terminal
+            - location
+            - trace
+            - requestDate
+            - requestTime
+            - hmacKey
+            
+            then use SHA256 to produce the signature then prepend the string 'sha256-'
+      required:  
+        - currency
+        - amount
+        - terminal
+        - location
+        - trace
+        - requestDate
+        - requestTime
+        - signature
+  
+  
