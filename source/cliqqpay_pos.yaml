@@ -3,7 +3,7 @@ info:
   title: CLiQQ PAY E-Money API
   description: | 
     This is the API that MUST be implemented by E-Money Issuers to get accepted at 7-Eleven Stores
-  version: 1.0.0a
+  version: 1.0.0b
 
 servers:
   - url: https://ISSUER_HOST/api
@@ -47,7 +47,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Charge'
+                $ref: '#/components/schemas/ChargeResponse'
         '201':
           description: |
             This result should be returned if and only if:
@@ -59,7 +59,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Charge'
+                $ref: '#/components/schemas/ChargeResponse'
         '400':
           description: |
             This result should be returned if any of the following is true:
@@ -70,7 +70,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Charge'
+                $ref: '#/components/schemas/ChargeResponse'
         '500':
           description: |
             This result should be returned if any of the following is true:
@@ -78,7 +78,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Charge'
+                $ref: '#/components/schemas/ChargeResponse'
   /reversal:
     post:
       summary: Create a reversal
@@ -102,56 +102,71 @@ components:
       properties:
         totp:
           type: string
-          description: time based one time pin
-          minLength: 16
-          maxLength: 55
+          description: time based one time pin. cliqq pay will pre-alocate a 4 digit prefix to each e-money partner
+          minLength: 18
+          maxLength: 21
+          example: 910112345678901234
         currency:
           type: string
           minLength: 3
           maxLength: 8
           enum: [php,usd]
           description: the currency of the charge
+          example: php
         amount:
           type: number
           format: int
           minimum: 1
           maximum: 500000
           description: amount to deduct multiplied by 100 i.e. 101.23 -> 10123
+          example: 10123
         cashier:
           type: string
           minLength: 3
           maxLength: 55
           description: identifies the cashier making the charge
+          example: jdelacruz
         terminal:
           type: string
           minLength: 3
           maxLength: 55
           description: identifies the terminal making the charge
+          example: "16601"
         location:
           type: string
           minLength: 3
           maxLength: 55
           description: identifies the store making the charge
+          example: 166-columbia
         trace:
           type: string
           minLength: 3
           maxLength: 21
           description: terminal generated trace number 
+          example: 166012359591
         requestDate:
           type: string
-          format: date
-          description: the date at the terminal when the charge was created
+          description: the date at the terminal when the charge was created, format yyyy-MM-dd
+          example: "2018-10-01"
         requestTime:
           type: string
-          format: time
-          description: the time at the terminal when the charge was created
+          description: the time at the terminal when the charge was created, format hh:mm:ss assumed to be GMT+8
+          example: "23:59:59"
+        retry:
+          type: boolean
+          description: |
+            cliqqpay will set this to true to signal a retry.
+            when this field is set to true, emoney partners should check if the charge 
+            has already been processed using the following combination: requestDate, requestTime, location, terminal, trace
+            
+            if request was already processed, emoney partners should return the previousresults
+          example: false
         signature:
           type: string
-          format: byte
+          format: base
           description: |
-            base64 encoded HMAC-SHA256 i.e. sha256-XXXYYYZZZZ
             
-            To compute HMAC-SHA256 concatenate
+            To generate the value, concatenate
             - totp
             - currency
             - amount
@@ -161,50 +176,28 @@ components:
             - trace
             - requestDate
             - requestTime
+            - retry
             - hmacKey
             
             then use SHA256 to produce the signature then prepend the string 'sha256-'
-        retry:
-          type: boolean
-          description: |
-            cliqqpay will set this to true to signal a retry.
-            when this field is set to true, emoney partners should check if the charge 
-            has already been processed using the following combination: requestDate, requestTime, location, terminal, trace
-            
-            if already processed, emoney partners should return the previousresults
-        
-        resultCode:
-          type: number
-          format: int
-          description: machine readable status code, 0 for successful, non zero for error
-        result:
-          type: string
-          minLength: 3
-          maxLength: 21
-          description: human readable status or error message
-        authorizationCode:
-          type: string
-          minLength: 3
-          maxLength: 21
-          description: authorization code generated by issuer side system, empty when statusCode is non zero
-        issuerReference:
-          type: string
-          minLength: 3
-          maxLength: 21
-          description: reference number of the transaction on the issuer side system
-        issuerDate:
-          type: string
-          format: date
-          description: the date at the issuer side system
-        issuerTime:
-          type: string
-          format: time
-          description: the time at the issuer side system
-        remainingBalance:
-          type: number
-          format: int
-          description: the remaining balance of the wallet multiplied by 100 i.e. 101.23 -> 10123
           
+            given hmacKey: a2c36905-c9bb-4ed2-9423-ec170e1eb6c1 
+            and the following values:
+            
+              - totp: 910112345678901200
+              - currency: php
+              - amount: 10123
+              - cashier: jdelacruz
+              - terminal: 16601
+              - location: 166-columbia
+              - trace: 166012359591
+              - requestDate: 2018-10-01
+              - requestTime: 23:59:59
+              - retry: false
+            
+            the computed signature is:
+            sha256-f832c0e0cb961c089bb15a57178116b8f10109d71c6088c26275a2b36d3ebd23
+          example: sha256-f832c0e0cb961c089bb15a57178116b8f10109d71c6088c26275a2b36d3ebd23
           
       required:  
         - totp
@@ -217,6 +210,181 @@ components:
         - requestDate
         - requestTime
         - signature
+        - retry
+    ChargeResponse:
+      properties:
+        totp:
+          type: string
+          description: time based one time pin. cliqq pay will pre-alocate a 4 digit prefix to each e-money partner
+          minLength: 18
+          maxLength: 21
+          example: 910112345678901234
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 8
+          enum: [php,usd]
+          description: the currency of the charge
+          example: php
+        amount:
+          type: number
+          format: int
+          minimum: 1
+          maximum: 500000
+          description: amount to deduct multiplied by 100 i.e. 101.23 -> 10123
+          example: 10123
+        cashier:
+          type: string
+          minLength: 3
+          maxLength: 55
+          description: identifies the cashier making the charge
+          example: jdelacruz
+        terminal:
+          type: string
+          minLength: 3
+          maxLength: 55
+          description: identifies the terminal making the charge
+          example: "16601"
+        location:
+          type: string
+          minLength: 3
+          maxLength: 55
+          description: identifies the store making the charge
+          example: 166-columbia
+        trace:
+          type: string
+          minLength: 3
+          maxLength: 21
+          description: terminal generated trace number 
+          example: 166012359591
+        requestDate:
+          type: string
+          description: the date at the terminal when the charge was created, format yyyy-MM-dd
+          example: "2018-10-01"
+        requestTime:
+          type: string
+          description: the time at the terminal when the charge was created, format hh:mm:ss assumed to be GMT+8
+          example: "23:59:59"
+        retry:
+          type: boolean
+          description: |
+            cliqqpay will set this to true to signal a retry.
+            when this field is set to true, emoney partners should check if the charge 
+            has already been processed using the following combination: requestDate, requestTime, location, terminal, trace
+            
+            if request was already processed, emoney partners should return the previousresults
+          example: false
+        resultCode:
+          type: number
+          format: int
+          description: machine readable status code, 0 for successful, non zero for error
+          example: 0
+        result:
+          type: string
+          minLength: 3
+          maxLength: 21
+          description: human readable status or error message
+          example: "charge successful"
+        authorizationCode:
+          type: string
+          minLength: 3
+          maxLength: 21
+          description: authorization code generated by issuer side system, empty when statusCode is non zero
+          example: 123456
+        issuerReference:
+          type: string
+          minLength: 3
+          maxLength: 21
+          description: reference number of the transaction on the issuer side system
+          example: 16601010003
+        issuerDate:
+          type: string
+          description: the date at the issuer side system
+          example: "2018-10-02"
+        issuerTime:
+          type: string
+          description: the time at the issuer side system
+          example: "01:00:03"
+        mobileNumber:
+          type: string
+          description: the mobile number of the account
+          example: "+639175115611"
+        remainingBalance:
+          type: number
+          format: int
+          description: the remaining balance of the wallet multiplied by 100 i.e. 101.23 -> 10123          
+          example: 10123
+        signature:
+          type: string
+          format: base
+          description: |
+            
+            To generate the value, concatenate
+            - totp
+            - currency
+            - amount
+            - cashier
+            - terminal
+            - location
+            - trace
+            - requestDate
+            - requestTime
+            - retry
+            - resultCode
+            - result
+            - authorizationCode
+            - issuerReference
+            - issuerDate
+            - issuerTime
+            - hmacKey
+            
+            then use SHA256 to produce the signature then prepend the string 'sha256-'
+          
+            given hmacKey: a2c36905-c9bb-4ed2-9423-ec170e1eb6c1 
+            and the following values:
+            
+              - totp: 910112345678901200
+              - currency: php
+              - amount: 10123
+              - cashier: jdelacruz
+              - terminal: 16601
+              - location: 166-columbia
+              - trace: 166012359591
+              - requestDate: 2018-10-01
+              - requestTime: 23:59:59
+              - retry: false
+              - resultCode: 0
+              - result: charge successful
+              - authorizationCode: 123456
+              - issuerReference: 16601010003
+              - issuerDate: 2018-10-02
+              - issuerTime: 01:00:03
+              - mobileNumber: +639175115611
+              - remainingBalance: 10123
+            
+            the computed signature is:
+            sha256-efb82d4ebc7021317b7d32f008620cf23f8cc6e64defb4f17bdf675302d16e63
+          example: sha256-efb82d4ebc7021317b7d32f008620cf23f8cc6e64defb4f17bdf675302d16e63
+          
+      required:  
+        - totp
+        - currency
+        - amount
+        - cashier
+        - terminal
+        - location
+        - trace
+        - requestDate
+        - requestTime
+        - signature
+        - retry
+        - resultCode
+        - result
+        - authorizationCode
+        - issuerReference
+        - issuerDate
+        - issuerTime
+        
     Reversal:
       properties:
         currency:
