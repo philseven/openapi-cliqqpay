@@ -3,7 +3,7 @@ info:
   title: CLiQQ PAY E-Money API
   description: | 
     This is the API that MUST be implemented by E-Money Issuers to get accepted at 7-Eleven Stores
-  version: 1.0.0b
+  version: 1.0.0c
 
 servers:
   - url: https://ISSUER_HOST/api
@@ -59,26 +59,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChargeResponse'
+               $ref: '#/components/schemas/ChargeResponse'
         '400':
-          description: |
-            This result should be returned if any of the following is true:
-            - the terminal is NOT valid
-            - the location is NOT valid
-            - the signature is NOT valid
-            - the totp is NOT valid
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ChargeResponse'
+          $ref: '#/components/responses/InvalidParameters'
         '500':
-          description: |
-            This result should be returned if any of the following is true:
-            - balance deduction FAILED
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ChargeResponse'
+          $ref: '#/components/responses/DeductionFailed'
   /reversal:
     post:
       summary: Create a reversal
@@ -93,12 +78,16 @@ paths:
               $ref: '#/components/schemas/Reversal'
       responses:
         '200':
-          description: this result should only be retuned when a charge matching the request was not found
+          description: this result should only be returned when a charge matching the request was not found
         '201':
-          description: this result should only be retuned when a charge was found and was reversed
+          description: this result should only be returned when a charge was found and was reversed
+        '400':
+          $ref: '#/components/responses/InvalidParameters'
+
 components:
   schemas:
     Charge:
+      type: object
       properties:
         totp:
           type: string
@@ -177,12 +166,11 @@ components:
             - requestDate
             - requestTime
             - retry
-            - hmacKey
+            - sharedSecret
             
             then use SHA256 to produce the signature then prepend the string 'sha256-'
           
-            given hmacKey: a2c36905-c9bb-4ed2-9423-ec170e1eb6c1 
-            and the following values:
+            given following values:
             
               - totp: 910112345678901200
               - currency: php
@@ -194,11 +182,11 @@ components:
               - requestDate: 2018-10-01
               - requestTime: 23:59:59
               - retry: false
+              - sharedSecret: a2c36905-c9bb-4ed2-9423-ec170e1eb6c1
             
             the computed signature is:
-            sha256-f832c0e0cb961c089bb15a57178116b8f10109d71c6088c26275a2b36d3ebd23
-          example: sha256-f832c0e0cb961c089bb15a57178116b8f10109d71c6088c26275a2b36d3ebd23
-          
+            sha256-783610D5A85295D355DD32CAA83277F313A5A00A7AD39CD8FC3AFBE03DF6EFC4
+          example: sha256-783610D5A85295D355DD32CAA83277F313A5A00A7AD39CD8FC3AFBE03DF6EFC4
       required:  
         - totp
         - currency
@@ -209,9 +197,11 @@ components:
         - trace
         - requestDate
         - requestTime
-        - signature
         - retry
+        - signature
+        
     ChargeResponse:
+      type: object
       properties:
         totp:
           type: string
@@ -336,12 +326,12 @@ components:
             - issuerReference
             - issuerDate
             - issuerTime
-            - hmacKey
+            - sharedSecret
             
             then use SHA256 to produce the signature then prepend the string 'sha256-'
           
-            given hmacKey: a2c36905-c9bb-4ed2-9423-ec170e1eb6c1 
-            and the following values:
+            
+            given the following values:
             
               - totp: 910112345678901200
               - currency: php
@@ -361,11 +351,11 @@ components:
               - issuerTime: 01:00:03
               - mobileNumber: +639175115611
               - remainingBalance: 10123
+              - sharedSecret: a2c36905-c9bb-4ed2-9423-ec170e1eb6c1
             
             the computed signature is:
-            sha256-efb82d4ebc7021317b7d32f008620cf23f8cc6e64defb4f17bdf675302d16e63
-          example: sha256-efb82d4ebc7021317b7d32f008620cf23f8cc6e64defb4f17bdf675302d16e63
-          
+            sha256-8B6D0C433876D83098FC568755D2DB222A05B69A84C50FF1263D8563BB45E681
+          example: sha256-8B6D0C433876D83098FC568755D2DB222A05B69A84C50FF1263D8563BB45E681
       required:  
         - totp
         - currency
@@ -386,42 +376,62 @@ components:
         - issuerTime
         
     Reversal:
+      type: object
       properties:
+        totp:
+          type: string
+          description: time based one time pin. cliqq pay will pre-alocate a 4 digit prefix to each e-money partner
+          minLength: 18
+          maxLength: 21
+          example: 910112345678901234
         currency:
           type: string
           minLength: 3
           maxLength: 8
           enum: [php,usd]
           description: the currency of the charge being reveresed
+          example: php
         amount:
           type: number
           format: int
           minimum: 1
           maximum: 500000
           description: amount deducted by the charge multiplied by 100 i.e. 101.23 -> 10123
+          example: 10123
+        cashier:
+          type: string
+          minLength: 3
+          maxLength: 55
+          description: identifies the cashier making the reversal
+          example: jdelacruz
         terminal:
           type: string
           minLength: 3
           maxLength: 55
           description: identifies the terminal that made the charge being reveresed
+          example: "16601"
         location:
           type: string
           minLength: 3
           maxLength: 55
           description: identifies the store making the charge being reveresed
+          example: 166-columbia
         trace:
           type: string
           minLength: 3
           maxLength: 21
           description: terminal generated trace number when the charge was created 
+          example: 166012359591
         requestDate:
           type: string
           format: date
           description: the date at the terminal when the charge was created
+          example: "2018-10-01"
         requestTime:
           type: string
           format: time
           description: the time at the terminal when the charge was created
+          example: "23:59:59"
         signature:
           type: string
           format: byte
@@ -429,24 +439,81 @@ components:
             base64 encoded HMAC-SHA256 i.e. sha256-XXXYYYZZZZ
             
             To compute HMAC-SHA256 concatenate
+            - totp
             - currency
             - amount
+            - cashier
             - terminal
             - location
             - trace
             - requestDate
             - requestTime
-            - hmacKey
+            - retry
+            - sharedSecret
             
             then use SHA256 to produce the signature then prepend the string 'sha256-'
+          
+            given following values:
+            
+              - totp: 910112345678901200
+              - currency: php
+              - amount: 10123
+              - cashier: jdelacruz
+              - terminal: 16601
+              - location: 166-columbia
+              - trace: 166012359591
+              - requestDate: 2018-10-01
+              - requestTime: 23:59:59
+              - retry: false
+              - sharedSecret: a2c36905-c9bb-4ed2-9423-ec170e1eb6c1
+            
+            the computed signature is:
+            sha256-783610D5A85295D355DD32CAA83277F313A5A00A7AD39CD8FC3AFBE03DF6EFC4
       required:  
+        - totp
         - currency
         - amount
+        - cashier
         - terminal
         - location
         - trace
         - requestDate
         - requestTime
+        - retry
         - signature
   
-  
+  responses:
+    InvalidParameters:
+      description: |
+        This result should be returned if any of the following is true:
+        - the terminal is NOT valid
+        - the location is NOT valid
+        - the signature is NOT valid
+        - the totp is NOT valid
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              code:
+                type: string
+                example: 1
+              message:
+                type: string
+                example: Invalid Parameters received
+    DeductionFailed:
+      description: |
+        This result should be returned if any of the following is true:
+        - balance deduction FAILED
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              code:
+                type: string
+                example: 11
+              message:
+                type: string
+                example: Insufficient balance
+      
