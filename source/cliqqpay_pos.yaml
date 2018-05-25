@@ -3,7 +3,7 @@ info:
   title: CLiQQ PAY E-Money API
   description: | 
     This is the API that MUST be implemented by E-Money Issuers to get accepted at 7-Eleven Stores
-  version: 1.0.0c
+  version: 1.0.0d
 
 servers:
   - url: https://ISSUER_HOST/api
@@ -11,9 +11,6 @@ servers:
 tags:
 - name: "charge"
   description: "A charge deducts against an E-money wallet balance"
-- name: "reversal"
-  description: "A reversal cancels a previous charge and returns the amount to the walet balance"  
-  
 
 paths:
   /charge:
@@ -22,14 +19,16 @@ paths:
       description: |
         This endpoint will be called by cliqqpay whenever a Time based One Time Pin(TOTP) 
         from an E-money issuer partner is presented as payment for goods and/or services
+        as well as for reversal processing
       
       
         Issuer partners implementing this API must respond within 8 seconds or be timed out.
         When a transaction is timed out, cliqqpay will resend the transaction 
         with the retry flag set to true and will wait for another 8 seconds.
-      
         
         When no response is received, the terminal will time out and will queue a reversal message.
+        
+        For reversals, cliqqpay will send a request with reversal:true in the body
         
       tags: 
       - "charge"
@@ -44,6 +43,8 @@ paths:
           description: |
             this result should ony be returned when the transaction is a retry and the transaction has already
             been processed in a previous request
+            
+            in the case of a reversal, return this result if the transaction has already been reversed by a previous request
           content:
             application/json:
               schema:
@@ -55,7 +56,10 @@ paths:
             - the location is valid
             - the signature is valid
             - the totp is valid
-            - balance deduction was successful
+            - in the case of a regular charge, balance deduction was successful
+            - in the case of a reversal, return this result if the transaction alluded to exists 
+              and the current request has resulted for it to be tagged as for reversal
+            - in the case of a reversal, return this result if the transaction alluded to does not exist
           content:
             application/json:
               schema:
@@ -64,26 +68,7 @@ paths:
           $ref: '#/components/responses/InvalidParameters'
         '500':
           $ref: '#/components/responses/DeductionFailed'
-  /reversal:
-    post:
-      summary: Create a reversal
-      description: This endpoint will be called by cliqqpay in response to a reversal message from the terminal
-      tags: 
-      - "reversal"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/Reversal'
-      responses:
-        '200':
-          description: this result should only be returned when a charge matching the request was not found
-        '201':
-          description: this result should only be returned when a charge was found and was reversed
-        '400':
-          $ref: '#/components/responses/InvalidParameters'
-
+  
 components:
   schemas:
     Charge:
@@ -144,18 +129,27 @@ components:
         retry:
           type: boolean
           description: |
+            this is an optional property, assume its value is false if it is not present.
             cliqqpay will set this to true to signal a retry.
             when this field is set to true, emoney partners should check if the charge 
             has already been processed using the following combination: requestDate, requestTime, location, terminal, trace
             
-            if request was already processed, emoney partners should return the previousresults
+            if request was already processed, emoney partners should return the previous results
+          example: false
+        reverse:
+          type: boolean
+          description: |
+            this is an optional property, assume its value is false if it is not present.
+            cliqqpay will set this to true to signal a reversal.
+            when this field is set to true, emoney partners should check if the charge alluded to exist
+            and reverse it.
           example: false
         signature:
           type: string
           format: base
           description: |
             
-            To generate the value, concatenate
+            To generate the value, concatenate the value of
             - totp
             - currency
             - amount
@@ -165,13 +159,12 @@ components:
             - trace
             - requestDate
             - requestTime
-            - retry
-            - sharedSecret
+            - retry (only when retry is true)
+            - reverse (only when reverse is true)
             
-            then use SHA256 to produce the signature then prepend the string 'sha256-'
+            then use HMAC-SHA256 to produce the signature then prepend the string 'hmac256-'
           
-            given following values:
-            
+            given the following values
               - totp: 910112345678901200
               - currency: php
               - amount: 10123
@@ -181,12 +174,13 @@ components:
               - trace: 166012359591
               - requestDate: 2018-10-01
               - requestTime: 23:59:59
-              - retry: false
-              - sharedSecret: a2c36905-c9bb-4ed2-9423-ec170e1eb6c1
+              
+            given the following secretKey = a2c36905-c9bb-4ed2-9423-ec170e1eb6c1
             
-            the computed signature is:
-            sha256-783610D5A85295D355DD32CAA83277F313A5A00A7AD39CD8FC3AFBE03DF6EFC4
-          example: sha256-783610D5A85295D355DD32CAA83277F313A5A00A7AD39CD8FC3AFBE03DF6EFC4
+            the computed signature should be:
+            
+            hmac256-8bfc32294b4b05a3bb6d8b016d1c704e870d285fcb1892e2880394ec1cd20bf4
+          example: hmac256-8bfc32294b4b05a3bb6d8b016d1c704e870d285fcb1892e2880394ec1cd20bf4
       required:  
         - totp
         - currency
@@ -197,7 +191,6 @@ components:
         - trace
         - requestDate
         - requestTime
-        - retry
         - signature
         
     ChargeResponse:
@@ -258,11 +251,20 @@ components:
         retry:
           type: boolean
           description: |
+            this is an optional property, assume its value is false if it is not present.
             cliqqpay will set this to true to signal a retry.
             when this field is set to true, emoney partners should check if the charge 
             has already been processed using the following combination: requestDate, requestTime, location, terminal, trace
             
-            if request was already processed, emoney partners should return the previousresults
+            if request was already processed, emoney partners should return the previous results
+          example: false
+        reverse:
+          type: boolean
+          description: |
+            this is an optional property, assume its value is false if it is not present.
+            cliqqpay will set this to true to signal a reversal.
+            when this field is set to true, emoney partners should check if the charge alluded to exist
+            and reverse it.
           example: false
         resultCode:
           type: number
@@ -319,17 +321,16 @@ components:
             - trace
             - requestDate
             - requestTime
-            - retry
+            - retry (only when retry is true)
+            - reverse (only when reverse is true)
             - resultCode
             - result
             - authorizationCode
             - issuerReference
             - issuerDate
             - issuerTime
-            - sharedSecret
             
-            then use SHA256 to produce the signature then prepend the string 'sha256-'
-          
+            then use HMAC-SHA256 to produce the signature then prepend the string 'hmac256-'
             
             given the following values:
             
@@ -342,7 +343,6 @@ components:
               - trace: 166012359591
               - requestDate: 2018-10-01
               - requestTime: 23:59:59
-              - retry: false
               - resultCode: 0
               - result: charge successful
               - authorizationCode: 123456
@@ -351,11 +351,13 @@ components:
               - issuerTime: 01:00:03
               - mobileNumber: +639175115611
               - remainingBalance: 10123
-              - sharedSecret: a2c36905-c9bb-4ed2-9423-ec170e1eb6c1
+            
+            given the following secretKey = a2c36905-c9bb-4ed2-9423-ec170e1eb6c1
             
             the computed signature is:
-            sha256-8B6D0C433876D83098FC568755D2DB222A05B69A84C50FF1263D8563BB45E681
-          example: sha256-8B6D0C433876D83098FC568755D2DB222A05B69A84C50FF1263D8563BB45E681
+            
+            hmac256-224b454ec4d6e028dc98687a5a824e69c74a08caa0576e71196e0c207e4906e7
+          example: hmac256-224b454ec4d6e028dc98687a5a824e69c74a08caa0576e71196e0c207e4906e7
       required:  
         - totp
         - currency
@@ -367,121 +369,13 @@ components:
         - requestDate
         - requestTime
         - signature
-        - retry
         - resultCode
         - result
         - authorizationCode
         - issuerReference
         - issuerDate
         - issuerTime
-        
-    Reversal:
-      type: object
-      properties:
-        totp:
-          type: string
-          description: time based one time pin. cliqq pay will pre-alocate a 4 digit prefix to each e-money partner
-          minLength: 18
-          maxLength: 21
-          example: 910112345678901234
-        currency:
-          type: string
-          minLength: 3
-          maxLength: 8
-          enum: [php,usd]
-          description: the currency of the charge being reveresed
-          example: php
-        amount:
-          type: number
-          format: int
-          minimum: 1
-          maximum: 500000
-          description: amount deducted by the charge multiplied by 100 i.e. 101.23 -> 10123
-          example: 10123
-        cashier:
-          type: string
-          minLength: 3
-          maxLength: 55
-          description: identifies the cashier making the reversal
-          example: jdelacruz
-        terminal:
-          type: string
-          minLength: 3
-          maxLength: 55
-          description: identifies the terminal that made the charge being reveresed
-          example: "16601"
-        location:
-          type: string
-          minLength: 3
-          maxLength: 55
-          description: identifies the store making the charge being reveresed
-          example: 166-columbia
-        trace:
-          type: string
-          minLength: 3
-          maxLength: 21
-          description: terminal generated trace number when the charge was created 
-          example: 166012359591
-        requestDate:
-          type: string
-          format: date
-          description: the date at the terminal when the charge was created
-          example: "2018-10-01"
-        requestTime:
-          type: string
-          format: time
-          description: the time at the terminal when the charge was created
-          example: "23:59:59"
-        signature:
-          type: string
-          format: byte
-          description: |
-            base64 encoded HMAC-SHA256 i.e. sha256-XXXYYYZZZZ
-            
-            To compute HMAC-SHA256 concatenate
-            - totp
-            - currency
-            - amount
-            - cashier
-            - terminal
-            - location
-            - trace
-            - requestDate
-            - requestTime
-            - retry
-            - sharedSecret
-            
-            then use SHA256 to produce the signature then prepend the string 'sha256-'
-          
-            given following values:
-            
-              - totp: 910112345678901200
-              - currency: php
-              - amount: 10123
-              - cashier: jdelacruz
-              - terminal: 16601
-              - location: 166-columbia
-              - trace: 166012359591
-              - requestDate: 2018-10-01
-              - requestTime: 23:59:59
-              - retry: false
-              - sharedSecret: a2c36905-c9bb-4ed2-9423-ec170e1eb6c1
-            
-            the computed signature is:
-            sha256-783610D5A85295D355DD32CAA83277F313A5A00A7AD39CD8FC3AFBE03DF6EFC4
-      required:  
-        - totp
-        - currency
-        - amount
-        - cashier
-        - terminal
-        - location
-        - trace
-        - requestDate
-        - requestTime
-        - retry
-        - signature
-  
+    
   responses:
     InvalidParameters:
       description: |
@@ -505,6 +399,7 @@ components:
       description: |
         This result should be returned if any of the following is true:
         - balance deduction FAILED
+        - in the case of a reversal, return this if the processing of reversing the charge failed
       content:
         application/json:
           schema:
