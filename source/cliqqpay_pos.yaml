@@ -274,7 +274,7 @@ components:
         result:
           type: string
           minLength: 3
-          maxLength: 21
+          maxLength: 233
           description: human readable status or error message
           example: "charge successful"
         authorizationCode:
