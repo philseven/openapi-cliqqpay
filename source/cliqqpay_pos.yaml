@@ -124,7 +124,7 @@ components:
           example: "2018-10-01"
         requestTime:
           type: string
-          description: the time at the terminal when the charge was created, format hh:mm:ss assumed to be GMT+8
+          description: the time at the terminal when the charge was created, format HH:mm:ss assumed to be GMT+8
           example: "23:59:59"
         retry:
           type: boolean
